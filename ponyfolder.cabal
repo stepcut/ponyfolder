@@ -23,6 +23,7 @@ Executable ponyfolder
     http-enumerator == 0.7.*,
     web-routes == 0.27.*,
     aeson == 0.6.*,
-    clientsession
+    clientsession,
+    bson
 
   ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2 -fno-warn-orphans
