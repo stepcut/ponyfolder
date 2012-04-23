@@ -1,58 +1,62 @@
-{-# LANGUAGE OverloadedStrings, DeriveDataTypeable, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings, DeriveDataTypeable, RecordWildCards, TemplateHaskell, GeneralizedNewtypeDeriving, TypeFamilies #-}
 module Model.User where
 
-import Data.Aeson
-import Data.Data (Data, Typeable)
-import Server
-import Data.Text (Text, unpack)
-import Data.Map as M (Map, empty)
-import Data.Fleece
-import Data.Aeson
-import Data.Default
 import Control.Applicative
-import Database.MongoDB hiding (unpack)
-import Data.Time
+import Data.Aeson
+import Data.Aeson.TH (deriveJSON)
+import Data.Data (Data, Typeable)
+import Data.IxSet (Indexable(..), IxSet(..), (@=), Proxy(..), getOne, ixFun, ixSet, updateIx)
+import qualified Data.IxSet as I
+import Data.Map as M (Map, empty)
+import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
+import Data.Text (Text, unpack, pack)
+import Data.Time (UTCTime, getCurrentTime)
+import Control.Monad (mzero)
+import Control.Monad.Reader (ask)
+import Control.Monad.State (get, put)
+import Data.Acid
+import Data.String
 
-data User = User {
-        userEmail :: UserId,
-        userName :: Text,
-        userPublic :: Bool,
-        userNsfw :: Bool,
-        userCreated :: UTCTime,
-        userMeta :: Map Text Text
-    } deriving (Show, Read, Eq, Ord, Data, Typeable)
+newtype UserId = UserId { unUserId :: Text }
+    deriving (Eq, Ord, Data, Read, Show, Typeable, SafeCopy)
 
-mkUser email t = User email "" False False t M.empty
+instance ToJSON UserId where
+    toJSON = String . unUserId
 
-userCollection = "users"
-
-instance ToJSON User where
-    toJSON User{..} = object [
-                             "_id" .= userEmail,
-                             "display name" .= userName,
-                             "public" .= userPublic,
-                             "allow nsfw" .= userNsfw,
-                             "created at" .= userCreated,
-                             "meta" .= userMeta
-                             ]
-
-instance FromJSON User where
-    parseJSON (Object v) = User <$> v .: "_id" <*> v .: "display name" <*> v .: "public" <*> v .: "allow nsfw" <*> v .: "created at" <*> v .: "meta"
+instance FromJSON UserId where
+    parseJSON (String t) = return $ UserId t
     parseJSON _ = mzero
 
---userFind :: UserId -> Server User
-userFind email = msum [
-    doc <- runDB . findOne $ thisUser email
-    case mdoc of
+instance IsString UserId where
+    fromString = UserId . pack
+
+data User = User {
+        userEmail :: !UserId,
+        userName :: Text,
+        userPublic :: !Bool,
+        userNsfw :: !Bool,
+        userMeta :: Map Text Text
+    } deriving (Show, Read, Eq, Ord, Data, Typeable)
+$(deriveSafeCopy 0 'base ''User)
+$(deriveJSON (drop 4) ''User)
+
+instance Indexable User where
+    empty = ixSet [ ixFun $ \u -> [ userEmail u ] ]
+
+newtype UserSet = UserSet { unUserSet :: IxSet User }
+    deriving (Show, Read, Eq, Ord, Data, Typeable, SafeCopy)
+
+userByEmail :: UserId -> Update UserSet User
+userByEmail email = do
+    (UserSet userSet) <- get
+    case getOne $ userSet @= email of
+        Just u -> return u
         Nothing -> do
-            now <- liftIO getCurrentTime
-            let user = mkUser email now
-            runDB $ insert_ userCollection $ asDocument user
+            let user = mkUser email
+                userSet' = I.insert user userSet
+            put $ UserSet userSet
             return user
-        Just u -> cast $ val u
 
---currentUser :: Server User
-currentUser = userFind =<< authenticated
+mkUser email = User email "" False False M.empty
 
-thisUser :: Select a => UserId -> a
-thisUser email = select ["_id" =: unpack email] userCollection
+$(makeAcidic ''UserSet ['userByEmail])

@@ -1,9 +1,8 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell #-}
 module Server (
         PonyServerPartT, PonyServerPart, runPonyServer,
-        lookUserId, authenticated, logoutUser, setUserId,
-        runDB, UserId, liftIO,
-        throwError, catchError, mplus, msum, mzero
+        lookUserId, authenticated, logoutUser,
+        UserId, throwError, catchError, mplus, msum, mzero
     ) where
 
 import Control.Monad
@@ -13,11 +12,11 @@ import Control.Monad.Trans
 import Control.Monad.RWS
 import Control.Monad.State
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.ByteString.Char8 (pack, unpack)
 import Data.Data (Data, Typeable)
 import Data.Default
-import Data.SafeCopy (base, deriveSafeCopy)
-import Database.MongoDB as M hiding (unpack)
+import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
 import Happstack.Server
 import Happstack.Server.Error
 import Happstack.Server.Compression
@@ -27,9 +26,11 @@ import Web.ClientSession (getDefaultKey, encryptIO, decrypt, Key)
 import Data.Maybe (isJust, fromMaybe)
 import Control.Exception (bracket)
 
-type MongoPool e = Pool e Pipe
+import Model.User
 
-type UserId = Text
+instance Error Text where
+    noMsg = "No Message"
+    strMsg = T.pack
 
 newtype PonySession = PonySession { sessUid :: Maybe UserId }
     deriving (Ord, Read, Show, Eq, Typeable, Data)
@@ -38,34 +39,26 @@ $(deriveSafeCopy 0 'base ''PonySession)
 instance Default PonySession where
     def = PonySession Nothing
 
-newtype PonyServerPartT e m a = PonyServerPart { asRWS :: RWST (MongoPool e) () PonySession (ServerPartT (ErrorT e m)) a }
-    deriving (Monad, MonadIO, MonadReader (MongoPool e), MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
+newtype PonyServerPartT e m a = PonyServerPart { asRWS :: RWST () () PonySession (ServerPartT (ErrorT e m)) a }
+    deriving (Monad, MonadIO, MonadReader (), MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
 
-type PonyServerPart = PonyServerPartT IOError IO
+type PonyServerPart = PonyServerPartT Text IO
 
 runPonyServer :: PonyServerPart Response -> IO ()
-runPonyServer (PonyServerPart psp) = bracket mongoPool killAll $ \pool -> do
+runPonyServer (PonyServerPart psp) = do
     key <- getDefaultKey
     simpleHTTP nullConf $ do
         _ <- compressedResponseFilter
         decodeBody $ defaultBodyPolicy "/tmp/" (10 * 1024 * 1024) 4096 4096
         mapServerPartT' (spUnwrapErrorT errorHandler) $ do
             sess <- fmap (fromMaybe def . decodeSession key) (lookCookieValue "ponysession") `mplus` return def
-            (a, sess', _) <- runRWST psp pool sess
+            (a, sess', _) <- runRWST psp () sess
             csess <- encodeSession key sess'
             addCookie sessionLife $ mkCookie "ponysession" csess
             return a
     where
         errorHandler = simpleErrorHandler . show
         sessionLife = MaxAge $ 60 * 60 * 24 * 7
-
-mongoPool :: IO (MongoPool IOError)
-mongoPool = newPool fac 10
-    where fac = Factory {
-            newResource = connect $ M.host "127.0.0.1",
-            killResource = close,
-            isExpired = isClosed
-        }
 
 encodeSession :: (MonadIO m) => Key -> PonySession -> m String
 encodeSession k = liftIO . fmap unpack . encryptIO k . pack . show
@@ -90,13 +83,3 @@ setUserId = put . PonySession . Just
 
 logoutUser :: PonyServerPart ()
 logoutUser = put $ PonySession Nothing
-
-runDB :: Action IO a -> PonyServerPart a
-runDB a = do
-    pipe <- (liftIO . runIOE . aResource) =<< ask
-    f <- liftIO $ access pipe master "ponyfolder" a
-    case f of
-        Left failure -> do
-            throwError . userError . show $ failure
-            mzero
-        Right x -> return x
