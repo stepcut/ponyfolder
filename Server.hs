@@ -2,8 +2,8 @@
 module Server (
         PonyServerPartT, PonyServerPart, runPonyServer,
         lookUserId, authenticated, logoutUser, setUserId,
-        runDB,
-        throwError, catchError
+        runDB, UserId, liftIO,
+        throwError, catchError, mplus, msum, mzero
     ) where
 
 import Control.Monad

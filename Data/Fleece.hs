@@ -42,6 +42,8 @@ instance (Show a, Eq a, Typeable a, FromJSON a, ToJSON a) => Val a where
             Error _ -> Nothing
             Success a -> Just a
 
-asDocument :: (Monad m) => Value -> m M.Document
-asDocument (Object o) = return $ map (\(l, v) -> u (unpack l) := val v) $ H.toList o
-asDocument _ = fail "Not an object"
+asDocument :: (Monad m, ToJSON a) => a -> m M.Document
+asDocument = doc . toJSON
+    where
+        doc (Object o) = return $ map (\(l, v) -> u (unpack l) := val v) $ H.toList o
+        doc _ = fail "Not an object"
