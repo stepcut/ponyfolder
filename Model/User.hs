@@ -1,21 +1,20 @@
 {-# LANGUAGE OverloadedStrings, DeriveDataTypeable, RecordWildCards, TemplateHaskell, GeneralizedNewtypeDeriving, TypeFamilies #-}
 module Model.User where
 
-import Control.Applicative
-import Data.Aeson
-import Data.Aeson.TH (deriveJSON)
-import Data.Data (Data, Typeable)
-import Data.IxSet (Indexable(..), IxSet(..), (@=), (@<=), Proxy(..), getOne, ixFun, ixSet, updateIx)
-import qualified Data.IxSet as I
-import Data.Map as M (Map, empty)
-import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
-import Data.Text (Text, unpack, pack)
-import Data.Time (UTCTime, getCurrentTime)
 import Control.Monad (mzero)
 import Control.Monad.Reader (ask)
 import Control.Monad.State (get, put)
 import Data.Acid
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..))
+import Data.Aeson.TH (deriveJSON)
+import Data.Data (Data, Typeable)
+import Data.IxSet (Indexable(..), IxSet, (@=), (@<=), Proxy(..), ixFun, ixSet, updateIx)
+import Data.Map as M (Map, empty)
+import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
 import Data.String
+import Data.Text (Text, pack)
+import Data.Time (UTCTime)
+import qualified Data.IxSet as I
 
 newtype UserId = UserId { unUserId :: Text }
     deriving (Eq, Ord, Data, Read, Show, Typeable, SafeCopy)

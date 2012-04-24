@@ -8,21 +8,17 @@ module Server (
 import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
-import Control.Monad.Trans
 import Control.Monad.RWS
-import Control.Monad.State
 import Data.Text (Text)
+import Data.Aeson (encode, decode, FromJSON, ToJSON)
 import qualified Data.Text as T
-import Data.ByteString.Char8 (pack, unpack)
+import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Lazy.Char8 as BL
 import Data.Data (Data, Typeable)
-import Data.Default
+import Data.Default (Default(..))
 import Data.Time (getCurrentTime)
-import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
 import Happstack.Server
-import Happstack.Server.Error
 import Happstack.Server.Compression
-import System.IO.Pool
-import System.IO.Error
 import Web.ClientSession (getDefaultKey, encryptIO, decrypt, Key)
 import Data.Maybe (isJust, fromMaybe)
 import Control.Exception (bracket)
@@ -35,9 +31,8 @@ instance Error Text where
     noMsg = "No Message"
     strMsg = T.pack
 
-newtype PonySession = PonySession { sessUid :: Maybe UserId }
-    deriving (Ord, Read, Show, Eq, Typeable, Data)
-$(deriveSafeCopy 0 'base ''PonySession)
+newtype PonySession = PonySession (Maybe UserId)
+    deriving (Ord, Read, Show, Eq, Typeable, Data, FromJSON, ToJSON)
 
 instance Default PonySession where
     def = PonySession Nothing
@@ -46,7 +41,7 @@ data PonyContents = PonyContents {
         ponyUsers :: AcidState UserSet
     }
 
-newtype PonyServerPartT e m a = PonyServerPart { asRWS :: RWST PonyContents () PonySession (ServerPartT (ErrorT e m)) a }
+newtype PonyServerPartT e m a = PonyServerPart (RWST PonyContents () PonySession (ServerPartT (ErrorT e m)) a)
     deriving (Monad, MonadIO, MonadReader PonyContents, MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
 
 type PonyServerPart = PonyServerPartT Text IO
@@ -68,10 +63,12 @@ runPonyServer (PonyServerPart psp) = bracket (openLocalState initialUserSet) (cr
         sessionLife = MaxAge $ 60 * 60 * 24 * 7
 
 encodeSession :: (MonadIO m) => Key -> PonySession -> m String
-encodeSession k = liftIO . fmap unpack . encryptIO k . pack . show
+encodeSession k = liftIO . fmap B.unpack . encryptIO k . B.concat . BL.toChunks . encode
 
 decodeSession :: Key -> String -> Maybe PonySession
-decodeSession k = fmap (read . unpack) . decrypt k . pack
+decodeSession k s = do
+    v <- decrypt k $ B.pack s
+    decode . BL.fromChunks $ [v]
 
 authenticated :: PonyServerPart ()
 authenticated = do
@@ -84,9 +81,6 @@ lookUserId = do
     case muid of
         Nothing -> mzero
         Just uid -> return uid
-
-setUserId :: UserId -> PonyServerPart ()
-setUserId = put . PonySession . Just
 
 logoutUser :: PonyServerPart ()
 logoutUser = put $ PonySession Nothing
