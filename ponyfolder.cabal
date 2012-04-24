@@ -8,26 +8,25 @@ Executable ponyfolder
   main-is: Main.hs
 
   Build-depends:
+    acid-state == 0.6.*,
+    aeson == 0.6.*,
+    authenticate == 1.2.*,
     base >= 4 && < 5,
     bytestring >= 0.9.1 && < 0.10,
-    mtl >= 2 && < 3,
-    text >= 0.11 && < 0.12,
-    time >= 1.1 && < 1.5,
-    happstack-server == 7.*,
-    happstack-server-tls == 7.*,
-    safecopy == 0.6.*,
-    acid-state == 0.6.*,
-    ixset,
-    happstack-hamlet == 7.*,
-    happstack-clientsession == 7.*,
-    http-enumerator == 0.7.*,
-    web-routes == 0.27.*,
-    web-routes-th,
-    web-routes-happstack,
-    aeson == 0.6.*,
-    hslogger == 1.1.*,
+    clientsession == 0.7.*,
+    conduit == 0.4.*,
     containers == 0.4.*,
     data-default == 0.4.*,
-    clientsession
+    hamlet == 1.*,
+    happstack-hamlet == 7.*,
+    happstack-server == 7.*,
+    happstack-server-tls == 7.*,
+    hslogger == 1.1.*,
+    http-conduit == 1.4.*,
+    ixset == 1.*,
+    mtl >= 2 && < 3,
+    safecopy == 0.6.*,
+    text >= 0.11 && < 0.12,
+    time >= 1.1 && < 1.5
 
   ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2 -fno-warn-orphans
