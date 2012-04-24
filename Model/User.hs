@@ -35,12 +35,9 @@ data AccessPermission = PermissionNone | PermissionAdmin
 $(deriveSafeCopy 0 'base ''AccessPermission)
 $(deriveJSON id ''AccessPermission)
 
-newtype UserPublic = UserPublic { unUserPublic :: Bool } deriving (Show, Read, Eq, Ord, Data, Typeable, SafeCopy)
-
 data User = User {
         userEmail :: !UserId,
         userName :: !Text,
-        userPublic :: !Bool,
         userNsfw :: !Bool,
         userPermissions :: !AccessPermission,
         userCreated :: !UTCTime,
@@ -52,7 +49,6 @@ $(deriveJSON (drop 4) ''User)
 instance Indexable User where
     empty = ixSet [ ixFun $ (:[]) . userEmail,
                     ixFun $ (:[]) . userName,
-                    ixFun $ (:[]) . UserPublic . userPublic,
                     ixFun $ (:[]) . userPermissions,
                     ixFun $ (:[]) . userCreated
                   ]
@@ -73,16 +69,21 @@ userByEmail email t = do
             put $ UserSet userSet
             return user
 
-publicUsers :: Query UserSet [User]
-publicUsers = do
+allUsers :: Query UserSet [User]
+allUsers = do
     (UserSet userSet) <- ask
-    return $ I.toAscList (Proxy :: Proxy Text) $ userSet @= (UserPublic True)
+    return $ I.toAscList (Proxy :: Proxy Text) userSet
 
 adminUsers :: Query UserSet [User]
 adminUsers = do
     (UserSet userSet) <- ask
     return $ I.toAscList (Proxy :: Proxy Text) $ userSet @= PermissionAdmin
 
-mkUser email t = User email "" False False PermissionNone t M.empty
+saveUser :: User -> Update UserSet ()
+saveUser user@User{..} = do
+    (UserSet userSet) <- get
+    put $ UserSet $ updateIx userEmail user userSet
 
-$(makeAcidic ''UserSet ['userByEmail, 'publicUsers, 'adminUsers])
+mkUser email t = User email "" False PermissionNone t M.empty
+
+$(makeAcidic ''UserSet ['userByEmail, 'allUsers, 'adminUsers, 'saveUser])
