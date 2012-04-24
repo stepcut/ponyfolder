@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell, RecordWildCards, TypeFamilies #-}
 module Server (
         PonyServerPartT, PonyServerPart, Sitemap(..), runPonyServer,
         lookUserId, authenticated, logoutUser, lookUser, updateUser,
@@ -25,10 +25,10 @@ import Control.Exception (bracket)
 import Data.Acid (openLocalState, AcidState, query, update)
 import Data.Acid.Local (createCheckpointAndClose)
 import Web.Routes
-import Web.Routes.TH
 import Web.Routes.Happstack
 
 import Model.User
+import Sitemap
 
 instance Error Text where
     noMsg = "No Message"
@@ -44,13 +44,12 @@ data PonyContents = PonyContents {
         ponyUsers :: AcidState UserSet
     }
 
-data Sitemap
-    = Home
-      deriving (Eq, Ord, Read, Show, Data, Typeable)
-$(derivePathInfo ''Sitemap)
-
 newtype PonyServerPartT e m a = PonyServerPartT { unPonyServerPartT :: RouteT Sitemap (RWST PonyContents () PonySession (ServerPartT (ErrorT e m))) a }
     deriving (Monad, MonadIO, MonadReader PonyContents, MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
+
+instance (Monad m, Error e) => MonadRoute (PonyServerPartT e m) where
+    type URL (PonyServerPartT e m) = Sitemap
+    askRouteFn = PonyServerPartT askRouteFn
 
 instance (Error e) => MonadTrans (PonyServerPartT e) where
     lift = PonyServerPartT . lift . lift . lift . lift
