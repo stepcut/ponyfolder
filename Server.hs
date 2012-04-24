@@ -25,6 +25,8 @@ import System.IO.Error
 import Web.ClientSession (getDefaultKey, encryptIO, decrypt, Key)
 import Data.Maybe (isJust, fromMaybe)
 import Control.Exception (bracket)
+import Data.Acid (openLocalState, AcidState)
+import Data.Acid.Local (createCheckpointAndClose)
 
 import Model.User
 
@@ -39,20 +41,24 @@ $(deriveSafeCopy 0 'base ''PonySession)
 instance Default PonySession where
     def = PonySession Nothing
 
-newtype PonyServerPartT e m a = PonyServerPart { asRWS :: RWST () () PonySession (ServerPartT (ErrorT e m)) a }
-    deriving (Monad, MonadIO, MonadReader (), MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
+data PonyContents = PonyContents {
+        ponyUsers :: AcidState UserSet
+    }
+
+newtype PonyServerPartT e m a = PonyServerPart { asRWS :: RWST PonyContents () PonySession (ServerPartT (ErrorT e m)) a }
+    deriving (Monad, MonadIO, MonadReader PonyContents, MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
 
 type PonyServerPart = PonyServerPartT Text IO
 
 runPonyServer :: PonyServerPart Response -> IO ()
-runPonyServer (PonyServerPart psp) = do
+runPonyServer (PonyServerPart psp) = bracket (openLocalState initialUserSet) (createCheckpointAndClose) $ \userSet -> do
     key <- getDefaultKey
     simpleHTTP nullConf $ do
         _ <- compressedResponseFilter
         decodeBody $ defaultBodyPolicy "/tmp/" (10 * 1024 * 1024) 4096 4096
         mapServerPartT' (spUnwrapErrorT errorHandler) $ do
             sess <- fmap (fromMaybe def . decodeSession key) (lookCookieValue "ponysession") `mplus` return def
-            (a, sess', _) <- runRWST psp () sess
+            (a, sess', _) <- runRWST psp (PonyContents userSet) sess
             csess <- encodeSession key sess'
             addCookie sessionLife $ mkCookie "ponysession" csess
             return a

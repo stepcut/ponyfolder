@@ -30,33 +30,59 @@ instance FromJSON UserId where
 instance IsString UserId where
     fromString = UserId . pack
 
+data AccessPermission = PermissionNone | PermissionAdmin
+    deriving (Eq, Ord, Data, Read, Show, Typeable)
+$(deriveSafeCopy 0 'base ''AccessPermission)
+$(deriveJSON id ''AccessPermission)
+
+newtype UserPublic = UserPublic { unUserPublic :: Bool } deriving (Show, Read, Eq, Ord, Data, Typeable, SafeCopy)
+
 data User = User {
         userEmail :: !UserId,
-        userName :: Text,
+        userName :: !Text,
         userPublic :: !Bool,
         userNsfw :: !Bool,
+        userPermissions :: !AccessPermission,
+        userCreated :: !UTCTime,
         userMeta :: Map Text Text
     } deriving (Show, Read, Eq, Ord, Data, Typeable)
 $(deriveSafeCopy 0 'base ''User)
 $(deriveJSON (drop 4) ''User)
 
 instance Indexable User where
-    empty = ixSet [ ixFun $ \u -> [ userEmail u ] ]
+    empty = ixSet [ ixFun $ (:[]) . userEmail,
+                    ixFun $ (:[]) . userName,
+                    ixFun $ (:[]) . UserPublic . userPublic,
+                    ixFun $ (:[]) . userPermissions,
+                    ixFun $ (:[]) . userCreated
+                  ]
 
 newtype UserSet = UserSet { unUserSet :: IxSet User }
     deriving (Show, Read, Eq, Ord, Data, Typeable, SafeCopy)
 
-userByEmail :: UserId -> Update UserSet User
-userByEmail email = do
+initialUserSet = UserSet I.empty
+
+userByEmail :: UserId -> UTCTime -> Update UserSet User
+userByEmail email t = do
     (UserSet userSet) <- get
     case getOne $ userSet @= email of
         Just u -> return u
         Nothing -> do
-            let user = mkUser email
+            let user = mkUser email t
                 userSet' = I.insert user userSet
             put $ UserSet userSet
             return user
 
-mkUser email = User email "" False False M.empty
+publicUsers :: Query UserSet [User]
+publicUsers = do
+    (UserSet userSet) <- ask
+    return $ I.toAscList (Proxy :: Proxy Text) $ userSet @= (UserPublic True)
 
-$(makeAcidic ''UserSet ['userByEmail])
+adminUsers :: Query UserSet [User]
+adminUsers = do
+    (UserSet userSet) <- ask
+    return $ I.toAscList (Proxy :: Proxy Text) $ userSet @= PermissionAdmin
+
+mkUser email t = User email "" False False PermissionNone t M.empty
+
+$(makeAcidic ''UserSet ['userByEmail, 'publicUsers, 'adminUsers])
