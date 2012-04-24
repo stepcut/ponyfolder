@@ -15,6 +15,7 @@ import Data.String
 import Data.Text (Text, pack)
 import Data.Time (UTCTime)
 import qualified Data.IxSet as I
+import qualified Data.Text as T
 
 newtype UserId = UserId { unUserId :: Text }
     deriving (Eq, Ord, Data, Read, Show, Typeable, SafeCopy)
@@ -79,6 +80,6 @@ saveUser user@User{..} = do
     put $ UserSet $ updateIx userEmail user userSet
 
 mkUser :: UserId -> UTCTime -> User
-mkUser email t = User email "" False PermissionNone t M.empty
+mkUser email@(UserId e) t = User email (T.takeWhile (/= '@') e) False PermissionNone t M.empty
 
 $(makeAcidic ''UserSet ['userByEmail, 'allUsers, 'adminUsers, 'saveUser])
