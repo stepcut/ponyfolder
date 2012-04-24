@@ -1,7 +1,7 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell, RecordWildCards #-}
 module Server (
         PonyServerPartT, PonyServerPart, runPonyServer,
-        lookUserId, authenticated, logoutUser,
+        lookUserId, authenticated, logoutUser, lookUser, updateUser,
         UserId, throwError, catchError, mplus, msum, mzero
     ) where
 
@@ -16,6 +16,7 @@ import qualified Data.Text as T
 import Data.ByteString.Char8 (pack, unpack)
 import Data.Data (Data, Typeable)
 import Data.Default
+import Data.Time (getCurrentTime)
 import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
 import Happstack.Server
 import Happstack.Server.Error
@@ -25,7 +26,7 @@ import System.IO.Error
 import Web.ClientSession (getDefaultKey, encryptIO, decrypt, Key)
 import Data.Maybe (isJust, fromMaybe)
 import Control.Exception (bracket)
-import Data.Acid (openLocalState, AcidState)
+import Data.Acid (openLocalState, AcidState, query, update)
 import Data.Acid.Local (createCheckpointAndClose)
 
 import Model.User
@@ -89,3 +90,15 @@ setUserId = put . PonySession . Just
 
 logoutUser :: PonyServerPart ()
 logoutUser = put $ PonySession Nothing
+
+lookUser :: PonyServerPart User
+lookUser = do
+    uid <- lookUserId
+    PonyContents{..} <- ask
+    now <- liftIO getCurrentTime
+    liftIO $ query ponyUsers $ UserByEmail uid now
+
+updateUser :: User -> PonyServerPart ()
+updateUser user = do
+    PonyContents{..} <- ask
+    liftIO $ update ponyUsers $ SaveUser user

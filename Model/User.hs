@@ -5,7 +5,7 @@ import Control.Applicative
 import Data.Aeson
 import Data.Aeson.TH (deriveJSON)
 import Data.Data (Data, Typeable)
-import Data.IxSet (Indexable(..), IxSet(..), (@=), Proxy(..), getOne, ixFun, ixSet, updateIx)
+import Data.IxSet (Indexable(..), IxSet(..), (@=), (@<=), Proxy(..), getOne, ixFun, ixSet, updateIx)
 import qualified Data.IxSet as I
 import Data.Map as M (Map, empty)
 import Data.SafeCopy (base, deriveSafeCopy, SafeCopy(..))
@@ -56,18 +56,13 @@ instance Indexable User where
 newtype UserSet = UserSet { unUserSet :: IxSet User }
     deriving (Show, Read, Eq, Ord, Data, Typeable, SafeCopy)
 
+initialUserSet :: UserSet
 initialUserSet = UserSet I.empty
 
-userByEmail :: UserId -> UTCTime -> Update UserSet User
+userByEmail :: UserId -> UTCTime -> Query UserSet User
 userByEmail email t = do
-    (UserSet userSet) <- get
-    case getOne $ userSet @= email of
-        Just u -> return u
-        Nothing -> do
-            let user = mkUser email t
-                userSet' = I.insert user userSet
-            put $ UserSet userSet
-            return user
+    (UserSet userSet) <- ask
+    return $ I.getOneOr (mkUser email t) $ userSet @= email @<= t
 
 allUsers :: Query UserSet [User]
 allUsers = do
@@ -84,6 +79,7 @@ saveUser user@User{..} = do
     (UserSet userSet) <- get
     put $ UserSet $ updateIx userEmail user userSet
 
+mkUser :: UserId -> UTCTime -> User
 mkUser email t = User email "" False PermissionNone t M.empty
 
 $(makeAcidic ''UserSet ['userByEmail, 'allUsers, 'adminUsers, 'saveUser])
