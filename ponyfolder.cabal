@@ -27,6 +27,9 @@ Executable ponyfolder
     mtl >= 2 && < 3,
     safecopy == 0.6.*,
     text >= 0.11 && < 0.12,
-    time >= 1.1 && < 1.5
+    time >= 1.1 && < 1.5,
+    web-routes == 0.27.*,
+    web-routes-happstack == 0.23.*,
+    web-routes-th == 0.21.*
 
   ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2 -fno-warn-orphans
