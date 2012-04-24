@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, DeriveDataTypeable, EmptyDataDecls, TemplateHaskell, RecordWildCards #-}
 module Server (
-        PonyServerPartT, PonyServerPart, runPonyServer,
+        PonyServerPartT, PonyServerPart, Sitemap(..), runPonyServer,
         lookUserId, authenticated, logoutUser, lookUser, updateUser,
         UserId, throwError, catchError, mplus, msum, mzero
     ) where
@@ -24,6 +24,9 @@ import Data.Maybe (isJust, fromMaybe)
 import Control.Exception (bracket)
 import Data.Acid (openLocalState, AcidState, query, update)
 import Data.Acid.Local (createCheckpointAndClose)
+import Web.Routes
+import Web.Routes.TH
+import Web.Routes.Happstack
 
 import Model.User
 
@@ -41,24 +44,45 @@ data PonyContents = PonyContents {
         ponyUsers :: AcidState UserSet
     }
 
-newtype PonyServerPartT e m a = PonyServerPart (RWST PonyContents () PonySession (ServerPartT (ErrorT e m)) a)
+data Sitemap
+    = Home
+      deriving (Eq, Ord, Read, Show, Data, Typeable)
+$(derivePathInfo ''Sitemap)
+
+newtype PonyServerPartT e m a = PonyServerPartT { unPonyServerPartT :: RouteT Sitemap (RWST PonyContents () PonySession (ServerPartT (ErrorT e m))) a }
     deriving (Monad, MonadIO, MonadReader PonyContents, MonadError e, MonadState PonySession, ServerMonad, MonadPlus, FilterMonad Response)
+
+instance (Error e) => MonadTrans (PonyServerPartT e) where
+    lift = PonyServerPartT . lift . lift . lift . lift
 
 type PonyServerPart = PonyServerPartT Text IO
 
-runPonyServer :: PonyServerPart Response -> IO ()
-runPonyServer (PonyServerPart psp) = bracket (openLocalState initialUserSet) (createCheckpointAndClose) $ \userSet -> do
+site :: (Monad m, Error e) =>
+        AcidState UserSet
+     -> PonySession
+     -> (Sitemap -> PonyServerPartT e m a)
+     -> Site Sitemap (ServerPartT (ErrorT e m) (a, PonySession))
+site userSet sess router =
+    setDefault Home $ mkSitePI route'
+    where
+      route' f u =
+          do (a, ps, ()) <- runRWST (unRouteT (unPonyServerPartT (router u)) f) (PonyContents userSet) sess
+             return (a, ps)
+
+runPonyServer :: ServerPart Response -> (Sitemap -> PonyServerPart Response) -> IO ()
+runPonyServer sp psp = bracket (openLocalState initialUserSet) (createCheckpointAndClose) $ \userSet -> do
     key <- getDefaultKey
     simpleHTTP nullConf $ do
         _ <- compressedResponseFilter
         decodeBody $ defaultBodyPolicy "/tmp/" (10 * 1024 * 1024) 4096 4096
-        mapServerPartT' (spUnwrapErrorT errorHandler) $ do
+        sp `mplus` (mapServerPartT' (spUnwrapErrorT errorHandler) $ do
             sess <- fmap (fromMaybe def . decodeSession key) (lookCookieValue "ponysession") `mplus` return def
-            (a, sess', _) <- runRWST psp (PonyContents userSet) sess
+            (a, sess') <- implSite "http://localhost:8000" "/r" (site userSet sess psp)
             csess <- encodeSession key sess'
             addCookie sessionLife $ mkCookie "ponysession" csess
-            return a
+            return a)
     where
+        errorHandler :: (Show e, Monad m) => e -> ServerPartT m Response
         errorHandler = simpleErrorHandler . show
         sessionLife = MaxAge $ 60 * 60 * 24 * 7
 

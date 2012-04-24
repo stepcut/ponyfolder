@@ -20,7 +20,7 @@ Executable ponyfolder
     ixset,
     happstack-hamlet == 7.*,
     happstack-clientsession == 7.*,
-    http-enumerator == 0.7.*,
+--    http-enumerator == 0.7.*,
     web-routes == 0.27.*,
     web-routes-th,
     web-routes-happstack,
@@ -28,6 +28,9 @@ Executable ponyfolder
     hslogger == 1.1.*,
     containers == 0.4.*,
     data-default == 0.4.*,
-    clientsession
+    clientsession,
+    web-routes,
+    web-routes-th
+
 
   ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2 -fno-warn-orphans
